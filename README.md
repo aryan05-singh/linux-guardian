@@ -6,6 +6,8 @@
 
 A small, config-driven self-healing health-check runner for any Linux server. No agents, no daemons, no LLM in the critical path — just deterministic checks, deterministic fixes, and a circuit breaker so it never hammers a problem it can't actually solve.
 
+**No AI subscription, API key, or account of any kind required.** This is a plain Python script — clone it, write a YAML config, run it on a schedule. If you want chat notifications, plug in a free Telegram bot token (from [@BotFather](https://t.me/BotFather)) or a Slack/Discord webhook URL — both are unrelated to any AI product.
+
 ## Why
 
 Most servers fail in a handful of boring, repetitive ways: a service crashes and doesn't restart, disk fills up with old logs, a cron job silently stops running, a background auth token expires. Fixing these by hand is easy but tedious, and if you're not watching, you find out from a user complaint instead of a check.
@@ -90,7 +92,7 @@ Guardian raises an error at load time if a referenced variable isn't set in the 
 ## Quick start
 
 ```bash
-git clone <this-repo> linux-guardian && cd linux-guardian
+git clone https://github.com/aryan05-singh/linux-guardian.git && cd linux-guardian
 ./setup.sh   # creates .venv, installs deps, scaffolds config.yaml
 
 # edit config.yaml: your service names, paths, thresholds, notify target

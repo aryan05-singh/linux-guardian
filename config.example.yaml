@@ -1,0 +1,61 @@
+# linux-guardian config
+# Copy to config.yaml and edit for your server. Every path/name below is an
+# example — nothing is hardcoded in the checker itself.
+
+state_file: guardian_state.json   # circuit-breaker fix-attempt history
+log_file: guardian.log
+
+notify:
+  method: stdout          # stdout | webhook | telegram
+  # webhook:
+  # method: webhook
+  # url: https://hooks.slack.com/services/XXX/YYY/ZZZ
+  #
+  # telegram:
+  # method: telegram
+  # bot_token: "123456:ABC-DEF-your-bot-token"
+  # chat_id: "123456789"
+
+circuit_breaker:
+  max_auto_fixes: 3     # stop auto-fixing and escalate after this many attempts...
+  window_hours: 6         # ...within this time window
+
+checks:
+  # Restart a systemd service if it's not active.
+  - type: systemd_service
+    name: myapp_service
+    service: myapp.service
+    scope: user            # user | system
+    auto_fix: true
+
+  # Free disk space by deleting old rotated logs when usage crosses threshold.
+  - type: disk_space
+    name: root_disk
+    path: /
+    threshold_pct: 90
+    fix_command: "find /var/log -name '*.log.*' -mtime +14 -delete"
+
+  # Did the nightly backup/cron job actually run? (checks a marker file's mtime)
+  - type: file_freshness
+    name: backup_freshness
+    marker_file: /var/backups/.last-run
+    max_age_hours: 26
+    fix_command: "/usr/local/bin/run-backup.sh"
+
+  # Crash-loop / recurring-error detector over a log file. No fix_command
+  # here on purpose — root cause varies too much to guess safely, so this
+  # always escalates instead of auto-restarting into a loop.
+  - type: log_pattern
+    name: app_crash_loop
+    log_file: /var/log/myapp/app.log
+    window_lines: 500
+    pattern: "FATAL|OutOfMemoryError"
+    max_matches: 3
+    fix_command: null
+
+  # Escape hatch: any shell command, 0 = healthy. Use for HTTP health
+  # endpoints, custom auth checks, etc.
+  - type: command
+    name: api_health
+    check_command: "curl -sf https://api.example.com/health"
+    fix_command: "systemctl --user restart myapp.service"

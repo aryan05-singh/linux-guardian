@@ -5,6 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from guardian import _interpolate_env, run, validate_config
+from history import build_report
 
 
 def test_interpolate_env_replaces_var(monkeypatch):
@@ -107,3 +108,30 @@ checks:
     assert payload["escalated"] is True
     assert payload["results"][0]["name"] == "broken_check"
     assert payload["results"][0]["status"] == "escalated"
+
+
+def test_run_records_history_and_pings_heartbeat(tmp_path, monkeypatch):
+    pinged = []
+    monkeypatch.setattr("guardian.ping_heartbeat", lambda url: pinged.append(url))
+
+    history_db = tmp_path / "history.db"
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(f"""
+state_file: {tmp_path / "state.json"}
+log_file: {tmp_path / "guardian.log"}
+history_db: {history_db}
+heartbeat_url: "https://hc-ping.com/fake-uuid"
+notify:
+  method: stdout
+checks:
+  - type: command
+    name: always_ok
+    check_command: "exit 0"
+""")
+    run(config_path)
+
+    assert history_db.exists()
+    report = build_report(history_db)
+    assert report[0]["name"] == "always_ok"
+    assert report[0]["uptime_pct"] == 100.0
+    assert pinged == ["https://hc-ping.com/fake-uuid"]

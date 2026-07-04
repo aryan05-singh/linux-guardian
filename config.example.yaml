@@ -4,6 +4,15 @@
 
 state_file: guardian_state.json   # circuit-breaker fix-attempt history
 log_file: guardian.log
+history_db: guardian_history.db   # per-run results, powers `guardian.py --report`
+
+# Dead man's switch: ping an external uptime monitor (e.g. https://healthchecks.io,
+# free tier) at the end of every successful run. If guardian itself stops
+# running — cron dies, the box is off, the script starts crashing before it
+# even loads this config — it can't escalate that fact about itself. The
+# external service notices the ping stopped arriving and alerts you through
+# its own independent channel.
+# heartbeat_url: "https://hc-ping.com/your-uuid-here"
 
 notify:
   method: stdout          # stdout | webhook | telegram

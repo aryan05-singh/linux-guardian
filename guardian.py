@@ -32,6 +32,8 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).parent))
 from checks.builtin import CHECK_DOCS, CHECK_TYPES, build_checks  # noqa: E402
+from heartbeat import ping_heartbeat  # noqa: E402
+from history import build_report, record_results  # noqa: E402
 from notify import make_notifier  # noqa: E402
 
 _ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
@@ -218,6 +220,13 @@ def run(
 
     save_state(state_file, state)
 
+    history_db = Path(config.get("history_db", "guardian_history.db"))
+    record_results(history_db, summary)
+
+    heartbeat_url = config.get("heartbeat_url")
+    if heartbeat_url:
+        ping_heartbeat(heartbeat_url)
+
     if json_output:
         print(json.dumps({"escalated": any_escalation, "results": summary}, indent=2))
     else:
@@ -248,7 +257,32 @@ def main() -> None:
         action="store_true",
         help="List available check types and their config keys, then exit",
     )
+    parser.add_argument(
+        "--report",
+        action="store_true",
+        help="Print per-check uptime %% and MTTR from history, then exit",
+    )
+    parser.add_argument(
+        "--since-hours",
+        type=float,
+        default=24 * 7,
+        help="Time window for --report, in hours (default: 168 = 7 days)",
+    )
     args = parser.parse_args()
+
+    if args.report:
+        config = load_config(args.config)
+        history_db = Path(config.get("history_db", "guardian_history.db"))
+        report = build_report(history_db, since_hours=args.since_hours)
+        if args.json:
+            print(json.dumps(report, indent=2))
+        elif not report:
+            print("No history yet — run guardian.py a few times first.")
+        else:
+            for r in report:
+                mttr = f"{r['mttr_seconds']:.0f}s" if r["mttr_seconds"] is not None else "n/a"
+                print(f"{r['name']}: {r['uptime_pct']}% uptime over {r['total_runs']} runs, MTTR {mttr}")
+        sys.exit(0)
 
     if args.list_checks:
         for check_type, doc in CHECK_DOCS.items():

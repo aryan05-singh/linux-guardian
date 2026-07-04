@@ -4,3 +4,4 @@ __pycache__/
 config.yaml
 guardian_state.json
 guardian.log
+guardian_history.db

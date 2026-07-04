@@ -48,9 +48,31 @@ python guardian.py --config config.yaml --validate-config  # check config.yaml i
 python guardian.py --config config.yaml --check my_check   # run only one named check (debugging)
 python guardian.py --config config.yaml --json             # machine-readable output on stdout
 python guardian.py --list-checks                            # show every check type + its config keys
+python guardian.py --config config.yaml --report            # uptime % and MTTR per check, from history
 ```
 
 `--json` output is guaranteed to be the only thing on stdout — notifications and logs are written to stderr/log file, so you can safely pipe it into `jq` or another tool without it choking on interleaved log lines.
+
+## History, uptime, and MTTR
+
+Every run appends each check's result to a local SQLite file (`history_db` in config, default `guardian_history.db`). `--report` turns that into, per check: total runs, uptime percentage, and MTTR (mean time to recovery — the average time from a check first going unhealthy to it next reporting healthy again):
+
+```bash
+$ python guardian.py --config config.yaml --report
+myapp_service: 99.2% uptime over 672 runs, MTTR 45s
+root_disk: 100.0% uptime over 672 runs, MTTR n/a
+website_cert: 100.0% uptime over 672 runs, MTTR n/a
+```
+
+`--since-hours N` narrows the window (default: 168h / 7 days). Combine with `--json` for machine-readable output.
+
+## Dead man's switch
+
+Guardian can only escalate problems if it's still running at all. If cron dies, the box loses power, or the script starts crashing before it even loads its config, guardian has no way to notice that about itself. Point `heartbeat_url` in config.yaml at a free external monitor like [healthchecks.io](https://healthchecks.io) — guardian pings it once per completed run, and if a ping doesn't arrive on schedule, the external service alerts you through its own independent channel:
+
+```yaml
+heartbeat_url: "https://hc-ping.com/your-uuid-here"
+```
 
 ## Secrets in config
 
@@ -111,7 +133,7 @@ See [`config.example.yaml`](config.example.yaml) for a fully commented example c
 .venv/bin/python -m pytest -q
 ```
 
-Covers the built-in checks (pass/fail/fix-availability for each type), the circuit breaker's time-window logic, config validation, env-var interpolation, dry-run behavior, and that `--json` output stays valid JSON even when a check escalates. CI also runs `ruff` on every push.
+Covers the built-in checks (pass/fail/fix-availability for each type), the circuit breaker's time-window logic, config validation, env-var interpolation, dry-run behavior, history/uptime/MTTR math, the heartbeat ping, and that `--json` output stays valid JSON even when a check escalates. CI also runs `ruff` on every push.
 
 ## Project origin
 

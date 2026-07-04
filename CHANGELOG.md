@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0] - 2026-07-04
+
+### Added
+- History tracking: every run's results are persisted to SQLite (`history_db` in config)
+- `--report` flag — per-check uptime % and MTTR (mean time to recovery) from history, windowed by `--since-hours`
+- Dead man's switch: `heartbeat_url` config option pings an external monitor (e.g. healthchecks.io) once per completed run, so guardian's own downtime can be caught by something other than itself
+- 8 new tests covering history math (uptime %, MTTR pairing, time-window filtering) and heartbeat ping behavior
+
 ## [0.2.0] - 2026-07-04
 
 ### Added

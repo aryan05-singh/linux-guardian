@@ -1,4 +1,4 @@
-import os
+import json
 import sys
 from pathlib import Path
 
@@ -83,3 +83,27 @@ checks:
     # even though check_b (excluded) would have failed.
     ok = run(config_path, only_check="check_a")
     assert ok is True
+
+
+def test_json_output_is_valid_json_even_with_escalation(tmp_path, capsys):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(f"""
+state_file: {tmp_path / "state.json"}
+log_file: {tmp_path / "guardian.log"}
+notify:
+  method: stdout
+checks:
+  - type: command
+    name: broken_check
+    check_command: "exit 1"
+""")
+    ok = run(config_path, json_output=True)
+    assert ok is False
+
+    captured = capsys.readouterr()
+    # stdout must be pure, parseable JSON — any notify/log noise belongs on
+    # stderr, otherwise downstream tooling piping stdout into json.loads breaks.
+    payload = json.loads(captured.out)
+    assert payload["escalated"] is True
+    assert payload["results"][0]["name"] == "broken_check"
+    assert payload["results"][0]["status"] == "escalated"

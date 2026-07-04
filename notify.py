@@ -10,6 +10,7 @@ calls notify(text), so it doesn't need to know which one is active.
 from __future__ import annotations
 
 import json
+import sys
 import urllib.error
 import urllib.request
 from typing import Callable
@@ -21,7 +22,7 @@ def _post_json(url: str, payload: dict, timeout: int = 10) -> None:
     try:
         urllib.request.urlopen(req, timeout=timeout)
     except urllib.error.URLError as e:
-        print(f"[notify] webhook failed: {e}")
+        print(f"[notify] webhook failed: {e}", file=sys.stderr)
 
 
 def make_notifier(cfg: dict) -> Callable[[str], None]:
@@ -46,6 +47,8 @@ def make_notifier(cfg: dict) -> Callable[[str], None]:
         return notify
 
     def notify(text: str) -> None:
-        print(f"[notify] {text}")
+        # stderr, not stdout, so --json output stays machine-parseable even
+        # when notifications fire in the same run.
+        print(f"[notify] {text}", file=sys.stderr)
 
     return notify

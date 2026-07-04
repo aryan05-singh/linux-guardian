@@ -46,7 +46,11 @@ python guardian.py --config config.yaml                  # normal run
 python guardian.py --config config.yaml --dry-run          # report what would be fixed, fix nothing
 python guardian.py --config config.yaml --validate-config  # check config.yaml is well-formed, don't run anything
 python guardian.py --config config.yaml --check my_check   # run only one named check (debugging)
+python guardian.py --config config.yaml --json             # machine-readable output on stdout
+python guardian.py --list-checks                            # show every check type + its config keys
 ```
+
+`--json` output is guaranteed to be the only thing on stdout — notifications and logs are written to stderr/log file, so you can safely pipe it into `jq` or another tool without it choking on interleaved log lines.
 
 ## Secrets in config
 
@@ -65,11 +69,10 @@ Guardian raises an error at load time if a referenced variable isn't set in the 
 
 ```bash
 git clone <this-repo> linux-guardian && cd linux-guardian
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+./setup.sh   # creates .venv, installs deps, scaffolds config.yaml
 
-cp config.example.yaml config.yaml
 # edit config.yaml: your service names, paths, thresholds, notify target
-
+.venv/bin/python guardian.py --config config.yaml --validate-config
 .venv/bin/python guardian.py --config config.yaml
 ```
 
@@ -78,6 +81,13 @@ Wire it to a schedule:
 ```cron
 # crontab -e
 */15 * * * * cd /path/to/linux-guardian && .venv/bin/python guardian.py --config config.yaml
+```
+
+Or run it in a container instead of a venv:
+
+```bash
+docker build -t linux-guardian .
+docker run --rm -v $(pwd)/config.yaml:/app/config.yaml linux-guardian
 ```
 
 Exit code is `0` if everything is healthy (or was auto-fixed), `1` if anything escalated — useful if you also want your cron/monitoring wrapper to alert on a non-zero exit.
@@ -101,7 +111,7 @@ See [`config.example.yaml`](config.example.yaml) for a fully commented example c
 .venv/bin/python -m pytest -q
 ```
 
-Covers the built-in checks (pass/fail/fix-availability for each type) and the circuit breaker's time-window logic (attempts accumulate, prune outside the window, tracked independently per check).
+Covers the built-in checks (pass/fail/fix-availability for each type), the circuit breaker's time-window logic, config validation, env-var interpolation, dry-run behavior, and that `--json` output stays valid JSON even when a check escalates. CI also runs `ruff` on every push.
 
 ## Project origin
 

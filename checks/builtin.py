@@ -128,7 +128,7 @@ def log_pattern_check(cfg: dict) -> Callable[[], dict]:
         with open(log_file, "r", errors="ignore") as f:
             lines = f.readlines()[-window_lines:]
 
-        matches = [l for l in lines if pattern.search(l)]
+        matches = [line for line in lines if pattern.search(line)]
         ok = len(matches) < max_matches
         return {
             "name": name,
@@ -312,6 +312,61 @@ CHECK_TYPES = {
     "process_running": process_running_check,
     "memory_usage": memory_usage_check,
     "cpu_load": cpu_load_check,
+}
+
+# Metadata for `guardian.py --list-checks` — kept separate from CHECK_TYPES
+# so the runtime dispatch table stays a plain name->factory mapping.
+CHECK_DOCS = {
+    "systemd_service": {
+        "description": "Is a systemd unit active? Fix = restart.",
+        "required": ["name", "service"],
+        "optional": {"scope": "user", "auto_fix": True},
+    },
+    "disk_space": {
+        "description": "Is disk usage under a threshold on a given path?",
+        "required": ["name"],
+        "optional": {"path": "/", "threshold_pct": 90, "fix_command": None},
+    },
+    "file_freshness": {
+        "description": "Has a marker file been touched recently? (cron/job freshness)",
+        "required": ["name", "marker_file"],
+        "optional": {"max_age_hours": 24, "fix_command": None},
+    },
+    "log_pattern": {
+        "description": "Does a log file contain more than N regex matches in the last window?",
+        "required": ["name", "log_file", "pattern"],
+        "optional": {"window_lines": 500, "max_matches": 1, "fix_command": None},
+    },
+    "command": {
+        "description": "Escape hatch — any shell command, exit 0 = healthy.",
+        "required": ["name", "check_command"],
+        "optional": {"fix_command": None},
+    },
+    "ssl_cert_expiry": {
+        "description": "Does a TLS cert expire within N days?",
+        "required": ["name", "hostname"],
+        "optional": {"port": 443, "warn_days": 14, "fix_command": None},
+    },
+    "port_open": {
+        "description": "Is something listening on host:port?",
+        "required": ["name", "port"],
+        "optional": {"host": "127.0.0.1", "timeout": 5, "fix_command": None},
+    },
+    "process_running": {
+        "description": "Is a process matching a pattern running (pgrep -f)?",
+        "required": ["name", "pattern"],
+        "optional": {"fix_command": None},
+    },
+    "memory_usage": {
+        "description": "Is RAM usage under a threshold? (Linux /proc/meminfo)",
+        "required": ["name"],
+        "optional": {"threshold_pct": 90, "fix_command": None},
+    },
+    "cpu_load": {
+        "description": "Is the 1-minute load average under a threshold?",
+        "required": ["name"],
+        "optional": {"threshold": 4.0, "fix_command": None},
+    },
 }
 
 

@@ -31,7 +31,7 @@ from pathlib import Path
 import yaml
 
 sys.path.insert(0, str(Path(__file__).parent))
-from checks.builtin import CHECK_TYPES, build_checks  # noqa: E402
+from checks.builtin import CHECK_DOCS, CHECK_TYPES, build_checks  # noqa: E402
 from notify import make_notifier  # noqa: E402
 
 _ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
@@ -99,9 +99,10 @@ def validate_config(config: dict) -> list[str]:
     return errors
 
 
-def _log(log_file: Path, msg: str) -> None:
+def _log(log_file: Path, msg: str, echo: bool = True) -> None:
     line = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}"
-    print(line)
+    if echo:
+        print(line)
     log_file.parent.mkdir(parents=True, exist_ok=True)
     with open(log_file, "a") as f:
         f.write(line + "\n")
@@ -127,8 +128,14 @@ def record_fix_attempt(state: dict, check_name: str, window_hours: float) -> int
     return len(attempts)
 
 
-def run(config_path: Path, dry_run: bool = False, only_check: str | None = None) -> bool:
+def run(
+    config_path: Path,
+    dry_run: bool = False,
+    only_check: str | None = None,
+    json_output: bool = False,
+) -> bool:
     config = load_config(config_path)
+    echo = not json_output
 
     state_file = Path(config.get("state_file", "guardian_state.json"))
     log_file = Path(config.get("log_file", "guardian.log"))
@@ -147,30 +154,35 @@ def run(config_path: Path, dry_run: bool = False, only_check: str | None = None)
 
     state = load_state(state_file)
     any_escalation = False
+    summary: list[dict] = []
 
     for check_fn in checks:
         try:
             result = check_fn()
         except Exception as e:
-            _log(log_file, f"CHECK ERROR: {e}")
+            _log(log_file, f"CHECK ERROR: {e}", echo)
             notify(f"⚠️ guardian: a check crashed: {e}")
+            summary.append({"name": check_fn.__name__, "status": "error", "detail": str(e)})
             any_escalation = True
             continue
 
         name = result["name"]
         if result["ok"]:
-            _log(log_file, f"OK   {name}: {result['detail']}")
+            _log(log_file, f"OK   {name}: {result['detail']}", echo)
+            summary.append({"name": name, "status": "ok", "detail": result["detail"]})
             continue
 
-        _log(log_file, f"FAIL {name}: {result['detail']}")
+        _log(log_file, f"FAIL {name}: {result['detail']}", echo)
 
         if result["fix"] is None:
             notify(f"\U0001f534 guardian: {name} is failing with no auto-fix.\n{result['detail']}")
+            summary.append({"name": name, "status": "escalated", "detail": result["detail"]})
             any_escalation = True
             continue
 
         if dry_run:
-            _log(log_file, f"DRY-RUN: would attempt fix for {name} ({result['detail']})")
+            _log(log_file, f"DRY-RUN: would attempt fix for {name} ({result['detail']})", echo)
+            summary.append({"name": name, "status": "dry_run", "detail": result["detail"]})
             any_escalation = True
             continue
 
@@ -180,29 +192,41 @@ def run(config_path: Path, dry_run: bool = False, only_check: str | None = None)
                 f"\U0001f534 guardian: {name} has failed {fix_count} times in "
                 f"{window_hours}h — stopping auto-fix, needs attention.\n{result['detail']}"
             )
+            summary.append({"name": name, "status": "escalated", "detail": result["detail"]})
             any_escalation = True
             continue
 
-        _log(log_file, f"FIX  attempting fix for {name} (attempt {fix_count}/{max_auto_fixes})")
+        _log(log_file, f"FIX  attempting fix for {name} (attempt {fix_count}/{max_auto_fixes})", echo)
         try:
             result["fix"]()
         except Exception as e:
-            _log(log_file, f"FIX ERROR: {name}: {e}")
+            _log(log_file, f"FIX ERROR: {name}: {e}", echo)
             notify(f"\U0001f534 guardian: fix for {name} threw an error: {e}")
+            summary.append({"name": name, "status": "error", "detail": str(e)})
             any_escalation = True
             continue
 
         recheck = check_fn()
         if recheck["ok"]:
-            _log(log_file, f"FIXED {name}")
+            _log(log_file, f"FIXED {name}", echo)
+            summary.append({"name": name, "status": "fixed", "detail": recheck["detail"]})
         else:
-            _log(log_file, f"FIX DID NOT HOLD: {name}: {recheck['detail']}")
+            _log(log_file, f"FIX DID NOT HOLD: {name}: {recheck['detail']}", echo)
             notify(f"\U0001f7e1 guardian: tried to fix {name} but it's still failing.\n{recheck['detail']}")
+            summary.append({"name": name, "status": "escalated", "detail": recheck["detail"]})
             any_escalation = True
 
     save_state(state_file, state)
-    if not any_escalation:
-        _log(log_file, "All checks OK, no escalation needed")
+
+    if json_output:
+        print(json.dumps({"escalated": any_escalation, "results": summary}, indent=2))
+    else:
+        counts: dict[str, int] = {}
+        for r in summary:
+            counts[r["status"]] = counts.get(r["status"], 0) + 1
+        parts = [f"{v} {k}" for k, v in counts.items()]
+        _log(log_file, f"Summary: {len(summary)} checks — " + ", ".join(parts), echo)
+
     return not any_escalation
 
 
@@ -213,10 +237,29 @@ def main() -> None:
         "--dry-run", action="store_true", help="Report what would be fixed without running any fix"
     )
     parser.add_argument(
-        "--validate-config", action="store_true", help="Validate the config file and exit, without running checks"
+        "--validate-config",
+        action="store_true",
+        help="Validate the config file and exit, without running checks",
     )
     parser.add_argument("--check", metavar="NAME", help="Run only the check with this name")
+    parser.add_argument("--json", action="store_true", help="Print machine-readable JSON results to stdout")
+    parser.add_argument(
+        "--list-checks",
+        action="store_true",
+        help="List available check types and their config keys, then exit",
+    )
     args = parser.parse_args()
+
+    if args.list_checks:
+        for check_type, doc in CHECK_DOCS.items():
+            print(check_type)
+            print(f"  {doc['description']}")
+            print(f"  required: {', '.join(doc['required'])}")
+            if doc["optional"]:
+                opt_str = ", ".join(f"{k}={v}" for k, v in doc["optional"].items())
+                print(f"  optional: {opt_str}")
+            print()
+        sys.exit(0)
 
     if args.validate_config:
         config = load_config(args.config)
@@ -229,7 +272,7 @@ def main() -> None:
         print("Config OK")
         sys.exit(0)
 
-    ok = run(args.config, dry_run=args.dry_run, only_check=args.check)
+    ok = run(args.config, dry_run=args.dry_run, only_check=args.check, json_output=args.json)
     sys.exit(0 if ok else 1)
 
 

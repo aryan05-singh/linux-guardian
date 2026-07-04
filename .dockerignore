@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+.git/
+guardian_state.json
+guardian.log
+tests/

@@ -1,5 +1,7 @@
 # linux-guardian
 
+![tests](https://github.com/aryan05-singh/linux-guardian/actions/workflows/tests.yml/badge.svg)
+
 *by Aryan Singh*
 
 A small, config-driven self-healing health-check runner for any Linux server. No agents, no daemons, no LLM in the critical path — just deterministic checks, deterministic fixes, and a circuit breaker so it never hammers a problem it can't actually solve.

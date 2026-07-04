@@ -102,6 +102,17 @@ the new process starts polling.
 
 This is a genuine **agentic loop**, not a single API call: the model can call a `run_diagnostic` tool (from a small read-only allowlist — disk usage, memory, uptime, recent git log) to gather more evidence before it commits to an answer, up to a few rounds. If it's still not confident, it says so rather than guessing. See [`ai_investigate.py`](ai_investigate.py) — under 150 lines, no framework, just the Anthropic SDK's native tool-use loop.
 
+### Making it fully automatic (end-to-end, no manual step)
+
+`--investigate` above is a manual command — useful for testing, but it means a human has to notice an escalation and remember to run it. Set `ai_investigate.enabled: true` in config.yaml and guardian does this itself:
+
+```yaml
+ai_investigate:
+  enabled: true
+```
+
+Now the loop is genuinely end-to-end: cron runs guardian → a check fails → guardian tries its deterministic fix → if it has no fix, or the fix didn't hold, guardian **automatically** calls the AI investigation and includes the root-cause report directly in the notification (Telegram/Slack/webhook) it was already going to send. Nobody has to notice anything or run a follow-up command — you just read the message. This is opt-in and additive: with it off (default), escalations behave exactly as before; with it on, they arrive pre-diagnosed.
+
 Entirely optional — the base tool needs no AI, no API key, no subscription. This is an opt-in layer for when a rule genuinely isn't enough.
 
 ## Secrets in config

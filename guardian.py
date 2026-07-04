@@ -132,6 +132,35 @@ def record_fix_attempt(state: dict, check_name: str, window_hours: float) -> int
     return len(attempts)
 
 
+def _maybe_ai_investigate(config: dict, log_file: Path, check_name: str, detail: str) -> str | None:
+    """If ai_investigate.enabled is set and an API key is available, run the
+    AI root-cause investigation automatically as part of escalation — this
+    is what makes it a genuinely end-to-end automated agent rather than a
+    manual debugging command someone has to remember to run. Silently
+    no-ops if not configured (opt-in), and never lets an AI-side failure
+    (network, quota, missing package) break guardian's own run."""
+    ai_cfg = config.get("ai_investigate", {})
+    if not ai_cfg.get("enabled"):
+        return None
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return None
+    try:
+        evidence = gather_base_evidence(log_file)
+        return ai_investigate(
+            check_name, detail, evidence, api_key=api_key, model=ai_cfg.get("model", "claude-sonnet-5")
+        )
+    except Exception as e:
+        return f"(AI investigation failed: {e})"
+
+
+def _append_ai_investigation(config: dict, log_file: Path, name: str, detail: str, message: str) -> str:
+    ai_report = _maybe_ai_investigate(config, log_file, name, detail)
+    if ai_report:
+        message += f"\n\n\U0001f916 AI investigation:\n{ai_report}"
+    return message
+
+
 def run(
     config_path: Path,
     dry_run: bool = False,
@@ -179,7 +208,8 @@ def run(
         _log(log_file, f"FAIL {name}: {result['detail']}", echo)
 
         if result["fix"] is None:
-            notify(f"\U0001f534 guardian: {name} is failing with no auto-fix.\n{result['detail']}")
+            message = f"\U0001f534 guardian: {name} is failing with no auto-fix.\n{result['detail']}"
+            notify(_append_ai_investigation(config, log_file, name, result["detail"], message))
             summary.append({"name": name, "status": "escalated", "detail": result["detail"]})
             any_escalation = True
             continue
@@ -192,10 +222,11 @@ def run(
 
         fix_count = record_fix_attempt(state, name, window_hours)
         if fix_count > max_auto_fixes:
-            notify(
+            message = (
                 f"\U0001f534 guardian: {name} has failed {fix_count} times in "
                 f"{window_hours}h — stopping auto-fix, needs attention.\n{result['detail']}"
             )
+            notify(_append_ai_investigation(config, log_file, name, result["detail"], message))
             summary.append({"name": name, "status": "escalated", "detail": result["detail"]})
             any_escalation = True
             continue
@@ -216,7 +247,8 @@ def run(
             summary.append({"name": name, "status": "fixed", "detail": recheck["detail"]})
         else:
             _log(log_file, f"FIX DID NOT HOLD: {name}: {recheck['detail']}", echo)
-            notify(f"\U0001f7e1 guardian: tried to fix {name} but it's still failing.\n{recheck['detail']}")
+            message = f"\U0001f7e1 guardian: tried to fix {name} but it's still failing.\n{recheck['detail']}"
+            notify(_append_ai_investigation(config, log_file, name, recheck["detail"], message))
             summary.append({"name": name, "status": "escalated", "detail": recheck["detail"]})
             any_escalation = True
 

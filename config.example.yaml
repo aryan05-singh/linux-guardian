@@ -14,12 +14,22 @@ history_db: guardian_history.db   # per-run results, powers `guardian.py --repor
 # its own independent channel.
 # heartbeat_url: "https://hc-ping.com/your-uuid-here"
 
-# Optional AI root-cause investigation (`guardian.py --investigate <check>`).
-# Requires ANTHROPIC_API_KEY in the environment and `pip install -r
-# requirements-ai.txt`. Entirely separate from the deterministic fix path —
-# see README's "AI root-cause investigation" section.
+# Optional AI root-cause investigation. Requires ANTHROPIC_API_KEY in the
+# environment and `pip install -r requirements-ai.txt`. Entirely separate
+# from the deterministic fix path — see README's "AI root-cause
+# investigation" section.
+#
+# enabled: true makes this fully automatic — whenever a check escalates
+# (no fix, or its fix didn't hold), guardian calls the AI investigation
+# itself and includes the root-cause report in the notification. No
+# manual step needed; this is what makes it end-to-end rather than a
+# debugging command you have to remember to run yourself.
 # ai_investigate:
+#   enabled: true
 #   model: claude-sonnet-5
+#
+# Or run it manually against one check any time, whether or not
+# `enabled` is set: `guardian.py --config config.yaml --investigate NAME`
 
 notify:
   method: stdout          # stdout | webhook | telegram

@@ -135,3 +135,61 @@ checks:
     assert report[0]["name"] == "always_ok"
     assert report[0]["uptime_pct"] == 100.0
     assert pinged == ["https://hc-ping.com/fake-uuid"]
+
+
+def test_escalation_auto_runs_ai_investigation_when_enabled(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        "guardian.ai_investigate",
+        lambda name, detail, evidence, api_key, model: "Root cause: fake root cause from AI",
+    )
+
+    notified = []
+    monkeypatch.setattr("guardian.make_notifier", lambda cfg: notified.append)
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(f"""
+state_file: {tmp_path / "state.json"}
+log_file: {tmp_path / "guardian.log"}
+history_db: {tmp_path / "history.db"}
+notify:
+  method: stdout
+ai_investigate:
+  enabled: true
+checks:
+  - type: command
+    name: broken_check
+    check_command: "exit 1"
+""")
+    run(config_path)
+
+    assert any("Root cause: fake root cause from AI" in msg for msg in notified)
+
+
+def test_escalation_skips_ai_investigation_when_not_enabled(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
+    called = []
+    monkeypatch.setattr(
+        "guardian.ai_investigate",
+        lambda *a, **kw: called.append(1) or "should not be called",
+    )
+
+    notified = []
+    monkeypatch.setattr("guardian.make_notifier", lambda cfg: notified.append)
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(f"""
+state_file: {tmp_path / "state.json"}
+log_file: {tmp_path / "guardian.log"}
+history_db: {tmp_path / "history.db"}
+notify:
+  method: stdout
+checks:
+  - type: command
+    name: broken_check
+    check_command: "exit 1"
+""")
+    run(config_path)
+
+    assert called == []
+    assert not any("AI investigation" in msg for msg in notified)

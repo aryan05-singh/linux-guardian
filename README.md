@@ -1,5 +1,7 @@
 # linux-guardian
 
+*by Aryan Singh*
+
 A small, config-driven self-healing health-check runner for any Linux server. No agents, no daemons, no LLM in the critical path — just deterministic checks, deterministic fixes, and a circuit breaker so it never hammers a problem it can't actually solve.
 
 ## Why
@@ -79,3 +81,7 @@ This started as a private tool watching one specific personal automation stack, 
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## Author
+
+Built by **Aryan Singh** — [GitHub](https://github.com/aryan05-singh)

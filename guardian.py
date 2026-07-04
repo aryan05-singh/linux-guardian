@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -29,8 +31,72 @@ from pathlib import Path
 import yaml
 
 sys.path.insert(0, str(Path(__file__).parent))
-from checks.builtin import build_checks  # noqa: E402
+from checks.builtin import CHECK_TYPES, build_checks  # noqa: E402
 from notify import make_notifier  # noqa: E402
+
+_ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def _interpolate_env(value):
+    """Recursively replace ${VAR_NAME} in string config values with the
+    matching environment variable, so secrets (bot tokens, webhook URLs)
+    don't have to live in plaintext in config.yaml."""
+    if isinstance(value, str):
+        def replace(match: "re.Match[str]") -> str:
+            var_name = match.group(1)
+            if var_name not in os.environ:
+                raise KeyError(f"environment variable {var_name!r} referenced in config but not set")
+            return os.environ[var_name]
+
+        return _ENV_VAR_PATTERN.sub(replace, value)
+    if isinstance(value, dict):
+        return {k: _interpolate_env(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_interpolate_env(v) for v in value]
+    return value
+
+
+def load_config(config_path: Path) -> dict:
+    raw = yaml.safe_load(config_path.read_text()) or {}
+    return _interpolate_env(raw)
+
+
+def validate_config(config: dict) -> list[str]:
+    """Check the config is well-formed before actually running anything.
+    Returns a list of human-readable error strings (empty = valid)."""
+    errors: list[str] = []
+
+    try:
+        make_notifier(config.get("notify", {}))
+    except KeyError as e:
+        errors.append(f"notify config missing key: {e}")
+
+    checks_cfg = config.get("checks", [])
+    if not checks_cfg:
+        errors.append("no checks defined in config")
+
+    seen_names: set[str] = set()
+    for cfg in checks_cfg:
+        name = cfg.get("name")
+        if not name:
+            errors.append(f"check missing 'name': {cfg}")
+            continue
+        if name in seen_names:
+            errors.append(f"duplicate check name: {name!r}")
+        seen_names.add(name)
+
+        check_type = cfg.get("type")
+        if check_type not in CHECK_TYPES:
+            errors.append(f"check {name!r} has unknown type: {check_type!r}")
+            continue
+        try:
+            CHECK_TYPES[check_type](cfg)
+        except KeyError as e:
+            errors.append(f"check {name!r} missing required key: {e}")
+        except Exception as e:
+            errors.append(f"check {name!r} invalid: {e}")
+
+    return errors
 
 
 def _log(log_file: Path, msg: str) -> None:
@@ -61,8 +127,8 @@ def record_fix_attempt(state: dict, check_name: str, window_hours: float) -> int
     return len(attempts)
 
 
-def run(config_path: Path) -> bool:
-    config = yaml.safe_load(config_path.read_text()) or {}
+def run(config_path: Path, dry_run: bool = False, only_check: str | None = None) -> bool:
+    config = load_config(config_path)
 
     state_file = Path(config.get("state_file", "guardian_state.json"))
     log_file = Path(config.get("log_file", "guardian.log"))
@@ -71,7 +137,13 @@ def run(config_path: Path) -> bool:
     window_hours = cb_cfg.get("window_hours", 6)
 
     notify = make_notifier(config.get("notify", {}))
-    checks = build_checks(config.get("checks", []))
+    checks_cfg = config.get("checks", [])
+    if only_check:
+        checks_cfg = [c for c in checks_cfg if c.get("name") == only_check]
+        if not checks_cfg:
+            print(f"No check named {only_check!r} found in config")
+            return False
+    checks = build_checks(checks_cfg)
 
     state = load_state(state_file)
     any_escalation = False
@@ -94,6 +166,11 @@ def run(config_path: Path) -> bool:
 
         if result["fix"] is None:
             notify(f"\U0001f534 guardian: {name} is failing with no auto-fix.\n{result['detail']}")
+            any_escalation = True
+            continue
+
+        if dry_run:
+            _log(log_file, f"DRY-RUN: would attempt fix for {name} ({result['detail']})")
             any_escalation = True
             continue
 
@@ -132,8 +209,27 @@ def run(config_path: Path) -> bool:
 def main() -> None:
     parser = argparse.ArgumentParser(description="linux-guardian: self-healing health checks")
     parser.add_argument("--config", type=Path, default=Path("config.yaml"))
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Report what would be fixed without running any fix"
+    )
+    parser.add_argument(
+        "--validate-config", action="store_true", help="Validate the config file and exit, without running checks"
+    )
+    parser.add_argument("--check", metavar="NAME", help="Run only the check with this name")
     args = parser.parse_args()
-    ok = run(args.config)
+
+    if args.validate_config:
+        config = load_config(args.config)
+        errors = validate_config(config)
+        if errors:
+            print("Config validation FAILED:")
+            for e in errors:
+                print(f"  - {e}")
+            sys.exit(1)
+        print("Config OK")
+        sys.exit(0)
+
+    ok = run(args.config, dry_run=args.dry_run, only_check=args.check)
     sys.exit(0 if ok else 1)
 
 

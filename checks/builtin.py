@@ -140,6 +140,146 @@ def log_pattern_check(cfg: dict) -> Callable[[], dict]:
     return check
 
 
+def ssl_cert_expiry_check(cfg: dict) -> Callable[[], dict]:
+    """Warn before a TLS certificate expires. fix_command is typically a
+    renewal command (e.g. certbot renew) — re-checking after renewal
+    confirms it actually took effect."""
+    import socket
+    import ssl
+    from datetime import datetime, timezone
+
+    name = cfg["name"]
+    hostname = cfg["hostname"]
+    port = cfg.get("port", 443)
+    warn_days = cfg.get("warn_days", 14)
+    fix_command = cfg.get("fix_command")
+
+    def check() -> dict:
+        try:
+            ctx = ssl.create_default_context()
+            with socket.create_connection((hostname, port), timeout=10) as sock:
+                with ctx.wrap_socket(sock, server_hostname=hostname) as ssock:
+                    cert = ssock.getpeercert()
+            expires = datetime.strptime(cert["notAfter"], "%b %d %H:%M:%S %Y %Z").replace(
+                tzinfo=timezone.utc
+            )
+            days_left = (expires - datetime.now(timezone.utc)).days
+            ok = days_left > warn_days
+            return {
+                "name": name,
+                "ok": ok,
+                "detail": f"{hostname}:{port} cert expires in {days_left}d (warn threshold {warn_days}d)",
+                "fix": _shell_fix(fix_command) if not ok else None,
+            }
+        except Exception as e:
+            return {
+                "name": name,
+                "ok": False,
+                "detail": f"could not verify cert for {hostname}:{port}: {e}",
+                "fix": _shell_fix(fix_command),
+            }
+
+    return check
+
+
+def port_open_check(cfg: dict) -> Callable[[], dict]:
+    """Is something listening on host:port? Useful for databases, internal
+    APIs, or anything not managed by systemd."""
+    import socket
+
+    name = cfg["name"]
+    host = cfg.get("host", "127.0.0.1")
+    port = cfg["port"]
+    timeout = cfg.get("timeout", 5)
+    fix_command = cfg.get("fix_command")
+
+    def check() -> dict:
+        try:
+            with socket.create_connection((host, port), timeout=timeout):
+                ok = True
+                detail = f"{host}:{port} is open"
+        except OSError as e:
+            ok = False
+            detail = f"{host}:{port} not reachable: {e}"
+        return {
+            "name": name,
+            "ok": ok,
+            "detail": detail,
+            "fix": _shell_fix(fix_command) if not ok else None,
+        }
+
+    return check
+
+
+def process_running_check(cfg: dict) -> Callable[[], dict]:
+    """Is a process matching this pattern running, regardless of whether
+    it's managed by systemd? Backed by `pgrep -f`."""
+    name = cfg["name"]
+    pattern = cfg["pattern"]
+    fix_command = cfg.get("fix_command")
+
+    def check() -> dict:
+        result = _run(["pgrep", "-f", pattern])
+        ok = result.returncode == 0
+        return {
+            "name": name,
+            "ok": ok,
+            "detail": f"pgrep -f {pattern!r}: {'running' if ok else 'no matching process'}",
+            "fix": _shell_fix(fix_command) if not ok else None,
+        }
+
+    return check
+
+
+def memory_usage_check(cfg: dict) -> Callable[[], dict]:
+    """Linux-only: reads /proc/meminfo for used-memory percentage."""
+    name = cfg["name"]
+    threshold_pct = cfg.get("threshold_pct", 90)
+    fix_command = cfg.get("fix_command")
+
+    def check() -> dict:
+        meminfo = {}
+        with open("/proc/meminfo") as f:
+            for line in f:
+                parts = line.split(":")
+                if len(parts) == 2:
+                    meminfo[parts[0].strip()] = int(parts[1].strip().split()[0])
+
+        total = meminfo.get("MemTotal", 0)
+        available = meminfo.get("MemAvailable", 0)
+        used_pct = (1 - available / total) * 100 if total else 0
+        ok = used_pct < threshold_pct
+        return {
+            "name": name,
+            "ok": ok,
+            "detail": f"{used_pct:.1f}% memory used (threshold {threshold_pct}%)",
+            "fix": _shell_fix(fix_command) if not ok else None,
+        }
+
+    return check
+
+
+def cpu_load_check(cfg: dict) -> Callable[[], dict]:
+    """Linux-only: 1-minute load average against a threshold."""
+    import os
+
+    name = cfg["name"]
+    threshold = cfg.get("threshold", 4.0)
+    fix_command = cfg.get("fix_command")
+
+    def check() -> dict:
+        load1, _load5, _load15 = os.getloadavg()
+        ok = load1 < threshold
+        return {
+            "name": name,
+            "ok": ok,
+            "detail": f"1-min load average {load1:.2f} (threshold {threshold})",
+            "fix": _shell_fix(fix_command) if not ok else None,
+        }
+
+    return check
+
+
 def command_check(cfg: dict) -> Callable[[], dict]:
     """Escape hatch: any shell command that exits 0 for healthy, non-zero
     for unhealthy (curl health endpoints, custom scripts, etc.)."""
@@ -167,6 +307,11 @@ CHECK_TYPES = {
     "file_freshness": file_freshness_check,
     "log_pattern": log_pattern_check,
     "command": command_check,
+    "ssl_cert_expiry": ssl_cert_expiry_check,
+    "port_open": port_open_check,
+    "process_running": process_running_check,
+    "memory_usage": memory_usage_check,
+    "cpu_load": cpu_load_check,
 }
 
 

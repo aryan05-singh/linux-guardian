@@ -31,8 +31,35 @@ Every check and fix here is a plain deterministic function — `systemctl restar
 | `file_freshness` | Has a marker file been touched recently? Fix = re-run the job. | Did last night's backup/cron actually run? |
 | `log_pattern` | Does a log file contain more than N matches of a regex in the last window? | Crash-loop / recurring-error detection |
 | `command` | Escape hatch — any shell command, exit 0 = healthy. | HTTP health endpoints, custom auth checks |
+| `ssl_cert_expiry` | Does a TLS cert expire within N days? | Renewal reminders before a site goes down |
+| `port_open` | Is something listening on host:port? | Databases / internal services not managed by systemd |
+| `process_running` | Is a process matching a pattern running (`pgrep -f`)? | Non-systemd scripts and workers |
+| `memory_usage` | Is RAM usage under a threshold? (Linux `/proc/meminfo`) | Catch memory leaks before OOM |
+| `cpu_load` | Is the 1-minute load average under a threshold? | Catch runaway processes |
 
-Add a new type by writing one function in `checks/builtin.py` that returns a `check()` closure — see the existing five for the pattern.
+Add a new type by writing one function in `checks/builtin.py` that returns a `check()` closure — see the existing ones for the pattern.
+
+## CLI flags
+
+```bash
+python guardian.py --config config.yaml                  # normal run
+python guardian.py --config config.yaml --dry-run          # report what would be fixed, fix nothing
+python guardian.py --config config.yaml --validate-config  # check config.yaml is well-formed, don't run anything
+python guardian.py --config config.yaml --check my_check   # run only one named check (debugging)
+```
+
+## Secrets in config
+
+String values in `config.yaml` support `${ENV_VAR}` interpolation, so bot tokens and webhook URLs don't have to sit in plaintext in the file you might commit or share:
+
+```yaml
+notify:
+  method: telegram
+  bot_token: "${TELEGRAM_BOT_TOKEN}"
+  chat_id: "${TELEGRAM_CHAT_ID}"
+```
+
+Guardian raises an error at load time if a referenced variable isn't set in the environment, rather than silently sending to an empty chat ID.
 
 ## Quick start
 
@@ -65,7 +92,7 @@ Configured under `notify:` in `config.yaml`, one of:
 
 ## Example config
 
-See [`config.example.yaml`](config.example.yaml) for a fully commented example covering all five check types.
+See [`config.example.yaml`](config.example.yaml) for a fully commented example covering every check type.
 
 ## Tests
 

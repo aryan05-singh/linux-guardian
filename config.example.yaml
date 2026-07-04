@@ -11,10 +11,12 @@ notify:
   # method: webhook
   # url: https://hooks.slack.com/services/XXX/YYY/ZZZ
   #
-  # telegram:
+  # telegram (values below support ${ENV_VAR} interpolation so secrets never
+  # sit in this file in plaintext — set TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID
+  # in the environment guardian.py runs in):
   # method: telegram
-  # bot_token: "123456:ABC-DEF-your-bot-token"
-  # chat_id: "123456789"
+  # bot_token: "${TELEGRAM_BOT_TOKEN}"
+  # chat_id: "${TELEGRAM_CHAT_ID}"
 
 circuit_breaker:
   max_auto_fixes: 3     # stop auto-fixing and escalate after this many attempts...
@@ -59,3 +61,37 @@ checks:
     name: api_health
     check_command: "curl -sf https://api.example.com/health"
     fix_command: "systemctl --user restart myapp.service"
+
+  # Warn before a TLS cert expires. fix_command is typically your renewal
+  # command; the check re-runs after fixing to confirm it actually renewed.
+  - type: ssl_cert_expiry
+    name: website_cert
+    hostname: example.com
+    port: 443
+    warn_days: 14
+    fix_command: "certbot renew --quiet"
+
+  # Is something listening on this host:port? Good for DBs / internal APIs
+  # that aren't systemd-managed.
+  - type: port_open
+    name: postgres_port
+    host: 127.0.0.1
+    port: 5432
+    fix_command: "systemctl --user restart postgresql"
+
+  # Process-level check for anything not managed by systemd (pgrep -f under
+  # the hood).
+  - type: process_running
+    name: worker_process
+    pattern: "python3 worker.py"
+    fix_command: "nohup python3 /opt/myapp/worker.py &"
+
+  # Linux-only: % of RAM used, from /proc/meminfo.
+  - type: memory_usage
+    name: memory
+    threshold_pct: 90
+
+  # Linux-only: 1-minute load average.
+  - type: cpu_load
+    name: cpu
+    threshold: 8.0

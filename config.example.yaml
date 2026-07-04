@@ -14,6 +14,13 @@ history_db: guardian_history.db   # per-run results, powers `guardian.py --repor
 # its own independent channel.
 # heartbeat_url: "https://hc-ping.com/your-uuid-here"
 
+# Optional AI root-cause investigation (`guardian.py --investigate <check>`).
+# Requires ANTHROPIC_API_KEY in the environment and `pip install -r
+# requirements-ai.txt`. Entirely separate from the deterministic fix path —
+# see README's "AI root-cause investigation" section.
+# ai_investigate:
+#   model: claude-sonnet-5
+
 notify:
   method: stdout          # stdout | webhook | telegram
   # webhook:

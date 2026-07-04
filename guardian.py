@@ -31,6 +31,8 @@ from pathlib import Path
 import yaml
 
 sys.path.insert(0, str(Path(__file__).parent))
+from ai_investigate import gather_base_evidence  # noqa: E402
+from ai_investigate import investigate as ai_investigate  # noqa: E402
 from checks.builtin import CHECK_DOCS, CHECK_TYPES, build_checks  # noqa: E402
 from heartbeat import ping_heartbeat  # noqa: E402
 from history import build_report, record_results  # noqa: E402
@@ -268,7 +270,40 @@ def main() -> None:
         default=24 * 7,
         help="Time window for --report, in hours (default: 168 = 7 days)",
     )
+    parser.add_argument(
+        "--investigate",
+        metavar="NAME",
+        help="Run an AI root-cause investigation for one check (needs ANTHROPIC_API_KEY + `anthropic` pkg)",
+    )
     args = parser.parse_args()
+
+    if args.investigate:
+        config = load_config(args.config)
+        checks_cfg = config.get("checks", [])
+        check_cfg = next((c for c in checks_cfg if c.get("name") == args.investigate), None)
+        if check_cfg is None:
+            print(f"No check named {args.investigate!r} found in config")
+            sys.exit(1)
+
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            print("ANTHROPIC_API_KEY environment variable is required for --investigate")
+            sys.exit(1)
+
+        check_fn = CHECK_TYPES[check_cfg["type"]](check_cfg)
+        result = check_fn()
+        log_file = Path(config.get("log_file", "guardian.log"))
+        evidence = gather_base_evidence(log_file)
+        ai_cfg = config.get("ai_investigate", {})
+        report = ai_investigate(
+            result["name"],
+            result["detail"],
+            evidence,
+            api_key=api_key,
+            model=ai_cfg.get("model", "claude-sonnet-5"),
+        )
+        print(report)
+        sys.exit(0)
 
     if args.report:
         config = load_config(args.config)

@@ -51,6 +51,7 @@ python guardian.py --config config.yaml --check my_check   # run only one named 
 python guardian.py --config config.yaml --json             # machine-readable output on stdout
 python guardian.py --list-checks                            # show every check type + its config keys
 python guardian.py --config config.yaml --report            # uptime % and MTTR per check, from history
+python guardian.py --config config.yaml --investigate NAME  # AI root-cause analysis for one check (see below)
 ```
 
 `--json` output is guaranteed to be the only thing on stdout — notifications and logs are written to stderr/log file, so you can safely pipe it into `jq` or another tool without it choking on interleaved log lines.
@@ -75,6 +76,33 @@ Guardian can only escalate problems if it's still running at all. If cron dies, 
 ```yaml
 heartbeat_url: "https://hc-ping.com/your-uuid-here"
 ```
+
+## Optional: AI root-cause investigation
+
+Everything above is deliberately deterministic — see [Design principle](#design-principle-no-llm-judgment-calls-in-the-fix-path). But there's a real gap a rule can't fill: guardian can tell you a check is failing with no safe fix, and that's where it stops. It can't tell you *why*. Root-causing is a judgment call — correlating timing, ruling out red herrings, deciding what's actually relevant — and that's exactly what an LLM is good at, as long as it's kept out of the fix path itself.
+
+`--investigate <check_name>` hands the failure to Claude along with diagnostic evidence (guardian's own log tail, plus whatever the model asks for next) and gets back a structured root-cause report instead of a raw log dump:
+
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."
+pip install -r requirements-ai.txt
+
+python guardian.py --config config.yaml --investigate telegram_polling_errors
+```
+
+```
+Root cause: A duplicate bot process was likely running briefly during a deploy,
+causing Telegram's getUpdates conflict.
+Confidence: medium
+Evidence: 3 polling failures in the log window, clustered within 90 seconds of
+a systemd restart in the same log.
+Recommended action: If this recurs after a deploy, add a brief delay before
+the new process starts polling.
+```
+
+This is a genuine **agentic loop**, not a single API call: the model can call a `run_diagnostic` tool (from a small read-only allowlist — disk usage, memory, uptime, recent git log) to gather more evidence before it commits to an answer, up to a few rounds. If it's still not confident, it says so rather than guessing. See [`ai_investigate.py`](ai_investigate.py) — under 150 lines, no framework, just the Anthropic SDK's native tool-use loop.
+
+Entirely optional — the base tool needs no AI, no API key, no subscription. This is an opt-in layer for when a rule genuinely isn't enough.
 
 ## Secrets in config
 
@@ -135,7 +163,7 @@ See [`config.example.yaml`](config.example.yaml) for a fully commented example c
 .venv/bin/python -m pytest -q
 ```
 
-Covers the built-in checks (pass/fail/fix-availability for each type), the circuit breaker's time-window logic, config validation, env-var interpolation, dry-run behavior, history/uptime/MTTR math, the heartbeat ping, and that `--json` output stays valid JSON even when a check escalates. CI also runs `ruff` on every push.
+Covers the built-in checks (pass/fail/fix-availability for each type), the circuit breaker's time-window logic, config validation, env-var interpolation, dry-run behavior, history/uptime/MTTR math, the heartbeat ping, and that `--json` output stays valid JSON even when a check escalates. The AI investigate tool-use loop is tested with a fake Anthropic client injected via `sys.modules` — no real API key or network call needed, so it runs in CI same as everything else. CI also runs `ruff` on every push.
 
 ## Project origin
 

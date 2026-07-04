@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.0] - 2026-07-05
+
+### Added
+- `ai_investigate.py`: optional AI root-cause-analysis layer, kept fully separate from the deterministic check/fix path
+- `--investigate NAME` flag — hands a failing check to Claude with diagnostic evidence, gets back a structured root-cause report (root cause, confidence, evidence, recommended action)
+- Genuine agentic tool-use loop: the model can call a `run_diagnostic` tool from a small read-only allowlist (disk usage, memory, uptime, recent git log) to gather more evidence before concluding, instead of a single one-shot API call
+- `requirements-ai.txt` — kept separate from the core `requirements.txt` so the base tool still needs zero AI dependencies
+- 8 new tests covering the tool-use loop, evidence gathering, and the allowlist, using a fake Anthropic client (no real API key or network needed in CI)
+
 ## [0.3.0] - 2026-07-04
 
 ### Added
